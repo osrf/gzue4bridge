@@ -17,7 +17,6 @@ public class GzUE4Bridge : ModuleRules
 
 	public GzUE4Bridge(ReadOnlyTargetRules Target) : base(Target)
 	{
-//		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 /*		PublicIncludePaths.AddRange(
 			new string[] {
 				"GzUE4Bridge/Public"
@@ -77,10 +76,8 @@ public class GzUE4Bridge : ModuleRules
 
       PublicIncludePaths.Add(Path.Combine(ThirdPartyPath, "websocketpp"));
       string prefix = "/usr";
-      string includePrefix = Path.Combine(prefix, "include");
       string libPrefix = Path.Combine(prefix, "lib", "x86_64-linux-gnu");
       PublicAdditionalLibraries.Add(Path.Combine(libPrefix, "libboost_system.so"));
     }
-
 	}
 }

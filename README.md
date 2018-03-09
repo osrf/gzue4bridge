@@ -11,7 +11,7 @@ sudo apt install libgazebo7-dev
 
 ### GzWeb
 
-GzWeb provides the websocket server communicating between gazebo and our GzUE4Bridge plugin.
+GzWeb provides a websocket server for communicating between gazebo and the GzUE4Bridge plugin in Unreal.
 
 More info: http://gazebosim.org/tutorials?tut=gzweb_install&branch=gzweb_1.4
 
@@ -24,7 +24,7 @@ More info: http://gazebosim.org/tutorials?tut=gzweb_install&branch=gzweb_1.4
 
 https://wiki.unrealengine.com/Building_On_Linux
 
-## Installing GzUE4Bridge
+## Installing GzUE4Bridge Plugin
 
 1. Create a new C++ project using Unreal Editor
 
@@ -49,6 +49,8 @@ https://wiki.unrealengine.com/Building_On_Linux
 1. Go to Unreal Editor and enable the plugin. `Edit` > `Plugins`, scroll down to `Project` on left hand panel and search for `GzUE4Bridge`. Make sure `Enabled` is ticked.
 
 1. Restart Unreal Editor for it to take effect
+
+    Note: You may need to edit `gzue4bridge/Source/GzUE4Bridge/GzUE4Bridge.Build.cs` and update the path to boost library. TODO: need to figure out a cleaner way to do this.
 
 # Running GzUE4Bridge
 
