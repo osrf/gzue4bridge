@@ -5,7 +5,7 @@
 ### Gazebo
 
 ~~~
-# install gazebo 7 or later versions
+# install gazebo 7+
 sudo apt install libgazebo7-dev
 ~~~
 
@@ -33,12 +33,12 @@ https://wiki.unrealengine.com/Building_On_Linux
         cd path/to/your_project
         mkdir Plugins
 
-1. clone the gzue4bridge repo into the `Plugins` directory
+1. Clone the `gzue4bridge` repo into the `Plugins` directory
 
         cd Plugins
         hg clone https://bitbucket.org/osrf/gzue4bridge
 
-1. clone third party websocket client header-only library, websocketpp
+1. Clone third party websocket client library (header-only), `websocketpp`
 
         mkdir -p gzue4bridge/ThirdParty
         cd gzue4bridge/ThirdParty
@@ -46,7 +46,7 @@ https://wiki.unrealengine.com/Building_On_Linux
         cd websocketpp
         git checkout 0.7.0
 
-1. Go to Unreal Editor and enable the plugin. Edit > Plugins, scroll down to `Project` on left hand panel and search for `GzUE4Bridge`. Make sure `Enabled` is ticked.
+1. Go to Unreal Editor and enable the plugin. `Edit` > `Plugins`, scroll down to `Project` on left hand panel and search for `GzUE4Bridge`. Make sure `Enabled` is ticked.
 
 1. Restart Unreal Editor for it to take effect
 
@@ -59,7 +59,7 @@ https://wiki.unrealengine.com/Building_On_Linux
 
 1. Compile the project and GzUE4Bridge plugin if needed
 
-1. In one terminal, launch gazebo, e.g.
+1. In one terminal, launch gazebo server, e.g.
 
         gzserver --verbose worlds/shapes.world
 
@@ -68,5 +68,7 @@ https://wiki.unrealengine.com/Building_On_Linux
         cd path/to/gzweb
         npm start
 
-1. In Unreal Editor, hit Play (simulate mode) and you should see gazebo models (simple shapes) appear in the scene
+    you should see the message `Gazebo transport node connected to gzserver` and a few pose filter param settings.
+
+1. In Unreal Editor, hit the Play button (simulate mode) and you should see gazebo models (simple shapes) appear in the scene
 
