@@ -55,9 +55,12 @@ FVector GzUtil::CoordTransform(const FVector &_pos)
 //////////////////////////////////////////////////
 FRotator GzUtil::CoordTransform(const FRotator &_rot)
 {
-  // TODO convert rotations
-  return _rot;
+  // Convert rotations
+  FRotator rot(FQuat(FVector::UpVector, -FMath::DegreesToRadians(_rot.Yaw)) *
+      FQuat(FVector::RightVector, -FMath::DegreesToRadians(_rot.Pitch)) *
+      FQuat(FVector::ForwardVector, FMath::DegreesToRadians(_rot.Roll)));
 
+  return rot;
 }
 
 
