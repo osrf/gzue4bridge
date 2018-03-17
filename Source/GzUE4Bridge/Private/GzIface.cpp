@@ -20,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,8 @@
 #include "GzNode.h"
 #include "GzModel.h"
 #include "GzUtil.h"
+
+const static std::string SDF_VERSION = "1.6";
 
 /// \brief Private data for the FGzIface class
 class gazebo::ue4::FGzIfacePrivate
@@ -105,6 +108,90 @@ void FGzIface::Sync()
   FString fname;
   for (TActorIterator<AActor> it(this->GameWorld()); it; ++it)
   {
+    if (this->dataPtr->actors.find(it->GetName()) !=
+        this->dataPtr->actors.end())
+      continue;
+
+    TArray<UStaticMeshComponent *> meshComps;
+    it->GetComponents(meshComps);
+    if (meshComps.Num() > 0)
+    {
+      UE_LOG(LogTemp, Warning, TEXT("=== name: %s"), *(it->GetName()));
+      for (auto comp : meshComps)
+      {
+        UStaticMesh *mesh = comp->GetStaticMesh();
+        if (!mesh)
+          continue;
+
+        FBox bbox = mesh->GetBoundingBox();
+        FVector size = bbox.GetSize();
+        FVector center = bbox.GetCenter();
+        FVector min = bbox.Max;
+        FVector max = bbox.Min;
+
+        FVector scale = comp->GetComponentScale();
+        size *= scale;
+        size = size / GzUtil::GzToUE4Scale;
+
+        // large mesh == skybox? skip
+        if (size.X >= 32768 || size.Y >= 32768 || size.Z >= 32768)
+          continue;
+
+        FVector pos = comp->GetComponentLocation();
+        FRotator rot = comp->GetComponentRotation();
+
+        UE_LOG(LogTemp, Warning, TEXT(" min: %f, %f, %f"), min.X, min.Y, min.Z);
+        UE_LOG(LogTemp, Warning, TEXT(" max: %f, %f, %f"), max.X, max.Y, max.Z);
+        UE_LOG(LogTemp, Warning, TEXT(" pos: %f, %f, %f"), pos.X, pos.Y, pos.Z);
+        UE_LOG(LogTemp, Warning, TEXT(" rot: %f, %f, %f"), rot.Roll, rot.Pitch, rot.Yaw);
+        UE_LOG(LogTemp, Warning, TEXT(" scale: %f, %f, %f"), scale.X, scale.Y, scale.Z);
+        UE_LOG(LogTemp, Warning, TEXT(" center: %f, %f, %f"), center.X, center.Y, center.Z);
+
+        center *= scale;
+        center = GzUtil::UE4ToGz(center);
+        pos = GzUtil::UE4ToGz(pos);
+        rot = GzUtil::UE4ToGz(rot);
+
+        TSharedPtr<FJsonObject> msg = MakeShareable(new FJsonObject);
+        msg->SetStringField("name", it->GetName());
+        msg->SetStringField("type", "sdf");
+
+        std::stringstream geomStr;
+        geomStr << "<geometry><box><size>"
+                <<  size.X << " " << size.Y << " " << size.Z
+                << "</size></box></geometry>";
+        std::stringstream pivotStr;
+        pivotStr << "<pose>"
+                 << center.X << " " << center.Y << " " << center.Z
+                 << " 0 0 0"
+                 << "</pose>";
+
+        std::stringstream newModelStr;
+        newModelStr << "<sdf version ='" << SDF_VERSION << "'>"
+                    << "<model name='" << TCHAR_TO_UTF8(*it->GetName()) << "'>"
+                    <<   "<pose>"
+                    <<      pos.X << " " << pos.Y << " " << pos.Z << " "
+                    <<      rot.Roll << " " << rot.Pitch << " " << rot.Yaw
+                    <<   "</pose>"
+                    <<   "<link name='link'>"
+                    <<     "<visual name='visual'>"
+                    <<        pivotStr.str()
+                    <<        geomStr.str()
+                    <<     "</visual>"
+                    <<     "<collision name='collision'>"
+                    <<        pivotStr.str()
+                    <<        geomStr.str()
+                    <<     "</collision>"
+                    <<   "</link>"
+                    << "</model>"
+                    << "</sdf>";
+        msg->SetStringField("sdf", newModelStr.str().c_str());
+
+        this->dataPtr->node->Publish("~/factory", msg);
+      }
+    }
+
+
     // store all existing actors
     // TODO filter out some unwanted ones?
     this->dataPtr->actors[it->GetName()] = *it;
@@ -192,8 +279,8 @@ bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
 
   if (isModel)
   {
-    it->second->SetActorLocation(GzUtil::CoordTransform(pos));
-    it->second->SetActorRotation(GzUtil::CoordTransform(rot));
+    it->second->SetActorLocation(GzUtil::GzToUE4(pos));
+    it->second->SetActorRotation(GzUtil::GzToUE4(rot));
     return true;
   }
 
@@ -210,8 +297,8 @@ bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
   {
     if (c->GetName() == name)
     {
-      c->SetRelativeLocation(GzUtil::CoordTransform(pos));
-      c->SetRelativeRotation(GzUtil::CoordTransform(rot));
+      c->SetRelativeLocation(GzUtil::GzToUE4(pos));
+      c->SetRelativeRotation(GzUtil::GzToUE4(rot));
       return true;
     }
   }
@@ -234,7 +321,6 @@ void FGzIface::Tick(float _delta)
   if (!this->dataPtr->initialized)
   {
     this->Init();
-    this->Sync();
   }
 
   // process scene message
@@ -248,6 +334,8 @@ void FGzIface::Tick(float _delta)
     }
   }
   this->dataPtr->sceneMsgs.clear();
+
+  this->Sync();
 
   // process model message
   for (auto &m : this->dataPtr->modelMsgs)

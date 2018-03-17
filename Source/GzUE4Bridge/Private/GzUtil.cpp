@@ -22,7 +22,7 @@
 
 
 // Gz to UE4 scale conversion: meters to centimeters
-const double UNIT_SCALE = 100.0;
+const double gazebo::ue4::GzUtil::GzToUE4Scale = 100.0;
 
 //////////////////////////////////////////////////
 void GzUtil::ParsePose(TSharedPtr<FJsonObject> _poseObj,
@@ -47,13 +47,13 @@ void GzUtil::ParsePose(TSharedPtr<FJsonObject> _poseObj,
 
 
 //////////////////////////////////////////////////
-FVector GzUtil::CoordTransform(const FVector &_pos)
+FVector GzUtil::GzToUE4(const FVector &_pos)
 {
-  return FVector(_pos.X, -_pos.Y, _pos.Z) * UNIT_SCALE;
+  return FVector(_pos.X, -_pos.Y, _pos.Z) * GzToUE4Scale;
 }
 
 //////////////////////////////////////////////////
-FRotator GzUtil::CoordTransform(const FRotator &_rot)
+FRotator GzUtil::GzToUE4(const FRotator &_rot)
 {
   // Convert rotations
   FRotator rot(FQuat(FVector::UpVector, -FMath::DegreesToRadians(_rot.Yaw)) *
@@ -63,4 +63,19 @@ FRotator GzUtil::CoordTransform(const FRotator &_rot)
   return rot;
 }
 
+//////////////////////////////////////////////////
+FVector GzUtil::UE4ToGz(const FVector &_pos)
+{
+  return FVector(_pos.X, -_pos.Y, _pos.Z) / GzToUE4Scale;
+}
 
+//////////////////////////////////////////////////
+FRotator GzUtil::UE4ToGz(const FRotator &_rot)
+{
+  // Convert rotations
+  FRotator rot(FQuat(FVector::UpVector, -FMath::DegreesToRadians(_rot.Yaw)) *
+      FQuat(FVector::RightVector, -FMath::DegreesToRadians(_rot.Pitch)) *
+      FQuat(FVector::ForwardVector, FMath::DegreesToRadians(_rot.Roll)));
+
+  return rot;
+}

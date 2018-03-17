@@ -25,20 +25,40 @@ namespace gazebo
     class GzUtil
     {
       /// \brief Transform a position vector from Gz (right handed) to UE4
-      /// (left handed) coordinate system. Converts units from meters to centimers.
-      /// \param[in] _pos Input position vector in Gz coordinate system and scale
+      /// (left handed) coordinate system. Converts units from meters to
+      /// centimeters
+      /// \param[in] _pos Input position vector in Gz coordinate system and
+      /// scale
       /// \return Output position vector in UE4 coordinate system and scale
-      public: static FVector CoordTransform(const FVector &_pos);
+      public: static FVector GzToUE4(const FVector &_pos);
 
       /// \brief Tranform rotation from Gz (right handed) to UE4 (left handed)
       /// coordinate system.
       /// \param[in] _pos Input rotation in Gz coordinate system
       /// \return Output rotation in UE4 coordinate system
-      public: static FRotator CoordTransform(const FRotator &_rot);
+      public: static FRotator GzToUE4(const FRotator &_rot);
+
+      /// \brief Transform a position vector from UE (left handed) to Gz
+      /// (right handed) coordinate system. Converts units from centimeters to
+      /// meters
+      /// \param[in] _pos Input position vector in UE4 coordinate system and
+      /// scale
+      /// \return Output position vector in Gz coordinate system and scale
+      public: static FVector UE4ToGz(const FVector &_pos);
+
+      /// \brief Tranform rotation from UE4 (left handed) to Gz (right handed)
+      /// coordinate system.
+      /// \param[in] _pos Input rotation in UE4 coordinate system
+      /// \return Output rotation in Gz coordinate system
+      public: static FRotator UE4ToGz(const FRotator &_rot);
+
 
       /// \brief Parse pose from a json message
       public: static void ParsePose(TSharedPtr<FJsonObject> _json,
             FVector &_pos, FRotator &_rot);
+
+      /// \brief Gz To UE4 scale conversion: meters to centimeters
+      public: static const double GzToUE4Scale;
     };
   }
 }

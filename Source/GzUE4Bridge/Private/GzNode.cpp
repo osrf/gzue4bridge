@@ -180,6 +180,20 @@ void GzNode::Subscribe(const std::string &_topic,
 }
 
 //////////////////////////////////////////////////
+void GzNode::Publish(const std::string &_topic, TSharedPtr<FJsonObject> _msg)
+{
+  TSharedPtr<FJsonObject> json = MakeShareable(new FJsonObject);
+  json->SetStringField("op", "publish");
+  json->SetStringField("topic", _topic.c_str());
+  json->SetObjectField("msg", _msg);
+
+  FString outputStr;
+  TSharedRef<TJsonWriter<>> writer = TJsonWriterFactory<>::Create(&outputStr);
+  FJsonSerializer::Serialize(json.ToSharedRef(), writer);
+  this->Send(TCHAR_TO_UTF8(*outputStr));
+}
+
+//////////////////////////////////////////////////
 void GzNode::Send(const std::string &_msg)
 {
   std::lock_guard<std::mutex> lock(this->dataPtr->outMutex);

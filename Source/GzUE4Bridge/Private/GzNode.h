@@ -48,6 +48,11 @@ namespace gazebo
       public: void Subscribe(const std::string &_topic,
             std::function<void (TSharedPtr<FJsonObject>)> _cb);
 
+      /// \brief Public to a topic
+      /// \param[in] _topic Topic to publish to
+      /// \param[in] _msg Msg to send
+      public: void Publish(const std::string &_topic, TSharedPtr<FJsonObject> _msg);
+
       /// \brief Callback when a message is received on websocket client
       public: void MessageCallback(const std::string &_msg);
 
