@@ -76,6 +76,11 @@ namespace gazebo
       /// \return True pose update is successful
       private: bool UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json);
 
+    	public: bool SyncStaticMeshActor(AActor *_actor);
+    	public: bool SyncSkeletalMeshActor(AActor *_actor);
+    	public: bool UpdateSkeletalMeshActor(AActor *_actor);
+    	public: bool StepGz();
+
       /// \internal
       /// \brief Pointer to private data.
       private: std::unique_ptr<FGzIfacePrivate> dataPtr;
