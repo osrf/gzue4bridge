@@ -41,7 +41,8 @@ namespace gazebo
     	public: static FGzIface &Instance();
 
     	public: void Init();
-    	public: void Sync();
+    	public: void UE4ToGzSync();
+    	public: void GzToUE4Sync();
     	public: void ShutDown();
 
     	public: UWorld *GameWorld();
@@ -76,10 +77,11 @@ namespace gazebo
       /// \return True pose update is successful
       private: bool UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json);
 
-    	public: bool SyncStaticMeshActor(AActor *_actor);
-    	public: bool SyncSkeletalMeshActor(AActor *_actor);
-    	public: bool UpdateSkeletalMeshActor(AActor *_actor);
-    	public: bool StepGz();
+    	private: bool AdvertiseStaticMeshActor(AActor *_actor);
+    	private: bool AdvertiseSkeletalMeshActor(AActor *_actor);
+    	private: bool PublishSkeletalMeshActor(AActor *_actor);
+    	private: bool StepGz(const int _steps);
+    	private: void SetActorsPaused(const bool _paused);
 
       /// \internal
       /// \brief Pointer to private data.

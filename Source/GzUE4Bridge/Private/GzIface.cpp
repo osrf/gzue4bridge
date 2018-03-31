@@ -59,10 +59,18 @@ class gazebo::ue4::FGzIfacePrivate
   public: std::vector<TSharedPtr<FJsonObject>> modelMsgs;
 
   /// \brief A list of pose msgs.
-  public: std::vector<TSharedPtr<FJsonObject>> poseMsgs;
+  public: std::vector<TSharedPtr<FJsonObject>> posesMsgs;
 
   /// \brief A map of gazebo entity name and their id
   public: std::map<FString, unsigned int> entityIds;
+
+  /// \brief Flag to indicate if unreal should lock step with Gazebo
+  public: bool lockStep = true;
+  public: bool stepped = false;
+  public: bool paused = false;
+
+  public: double targetSimTime = 0;
+  public: double poseSimTime = 0;
 };
 
 using namespace gazebo;
@@ -106,7 +114,7 @@ void FGzIface::Init()
 }
 
 //////////////////////////////////////////////////
-void FGzIface::Sync()
+void FGzIface::UE4ToGzSync()
 {
   // step unreal
 
@@ -121,27 +129,59 @@ void FGzIface::Sync()
       // TODO filter out some unwanted ones?
       this->dataPtr->actors[it->GetName()] = *it;
 
-      if (this->SyncStaticMeshActor(*it))
+      if (this->AdvertiseStaticMeshActor(*it))
         continue;
 
-      if (this->SyncSkeletalMeshActor(*it))
+      if (this->AdvertiseSkeletalMeshActor(*it))
         continue;
     }
 
     // TODO uncomment me
-    // this->UpdateSkeletalMeshActor(*it);
+    // this->PublishSkeletalMeshActor(*it);
 
   }
-
-  // step Gazebo
-  this->StepGz();
 
   // wait for gazebo pose update to finish
   // look for timestamp in pose
 }
 
 //////////////////////////////////////////////////
-bool FGzIface::SyncStaticMeshActor(AActor *_actor)
+void FGzIface::GzToUE4Sync()
+{
+  std::lock_guard<std::mutex> lock(this->dataPtr->msgMutex);
+
+  // process model message
+  for (auto &m : this->dataPtr->modelMsgs)
+  {
+    this->CreateModelFromMsg(m);
+  }
+  this->dataPtr->modelMsgs.clear();
+
+  // process pose message
+  // TODO optimize and process only last pose message?
+  for (auto &ps : this->dataPtr->posesMsgs)
+  {
+    // get pose timestamp
+    TSharedPtr<FJsonObject> timeObj = ps->GetObjectField("time");
+    this->dataPtr->poseSimTime = timeObj->GetNumberField("sec") +
+        timeObj->GetNumberField("nsec")/1e9;
+
+    UE_LOG(LogTemp, Warning, TEXT("=== pose time: %f"), this->dataPtr->poseSimTime);
+
+    TArray<TSharedPtr<FJsonValue>> poses = ps->GetArrayField("pose");
+    for (auto p : poses)
+    {
+      TSharedPtr<FJsonObject> poseObj = p->AsObject();
+      this->UpdatePoseFromMsg(poseObj);
+    }
+  }
+  this->dataPtr->posesMsgs.clear();
+}
+
+
+
+//////////////////////////////////////////////////
+bool FGzIface::AdvertiseStaticMeshActor(AActor *_actor)
 {
   TArray<UStaticMeshComponent *> meshComps;
   _actor->GetComponents(meshComps);
@@ -225,7 +265,7 @@ bool FGzIface::SyncStaticMeshActor(AActor *_actor)
 }
 
 //////////////////////////////////////////////////
-bool FGzIface::SyncSkeletalMeshActor(AActor *_actor)
+bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
 {
   TArray<USkeletalMeshComponent *> meshComps;
   _actor->GetComponents(meshComps);
@@ -344,7 +384,7 @@ bool FGzIface::SyncSkeletalMeshActor(AActor *_actor)
 }
 
 //////////////////////////////////////////////////
-bool FGzIface::UpdateSkeletalMeshActor(AActor *_actor)
+bool FGzIface::PublishSkeletalMeshActor(AActor *_actor)
 {
     /////// testing/////
   //_actor->SetActorTickEnabled(false);
@@ -463,26 +503,36 @@ bool FGzIface::UpdateSkeletalMeshActor(AActor *_actor)
 }
 
 //////////////////////////////////////////////////
-bool FGzIface::StepGz()
+bool FGzIface::StepGz(const int _steps)
 {
-  // IMPORTANT: Set UE4 to use a fixed frame rate that is factor of Gazebo's
-  // physics update rate (1000Hz), e.g. If UE4 is set to run at 50Hz
-  // (at fixed step size of 20ms) then the number of steps for Gazebo to take
-  // will be:
-  //   1000 / 50 = 20 steps
-  // Settings are in Edit > Project Settings > Engine > General Settings.
-  // Make sure the 'Use Fixed Frame Rate' checkbox is checked and specify
-  // a Fixed Frame Rate that is a factor of 1000
-  double delta = this->GameWorld()->GetDeltaSeconds();
-  int gzRate = 1000;
-  int steps = static_cast<int>(std::round(gzRate * delta));
-
   TSharedPtr<FJsonObject> msg = MakeShareable(new FJsonObject);
   msg->SetBoolField("pause", true);
-  msg->SetNumberField("multi_step", steps);
+  msg->SetNumberField("multi_step", _steps);
 
   this->dataPtr->node->Publish("~/world_control", msg);
   return true;
+}
+
+//////////////////////////////////////////////////
+void FGzIface::SetActorsPaused(const bool _paused)
+{
+  if (_paused == this->dataPtr->paused)
+    return;
+
+  this->dataPtr->paused = _paused;
+
+  double timeDilation = _paused ? 0 : 1;
+
+  // update pose
+  FString fname;
+  for (TActorIterator<AActor> it(this->GameWorld()); it; ++it)
+  {
+    if (this->dataPtr->actors.find(it->GetName()) !=
+        this->dataPtr->actors.end())
+    {
+      (*it)->CustomTimeDilation = timeDilation;
+    }
+  }
 }
 
 //////////////////////////////////////////////////
@@ -491,8 +541,15 @@ void FGzIface::ShutDown()
   delete this->dataPtr->node;
   this->dataPtr->node = nullptr;
   this->dataPtr->initialized = false;
+  this->dataPtr->targetSimTime = 0;
+  this->dataPtr->poseSimTime = 0;
+  this->dataPtr->paused = false;
 
   this->dataPtr->actors.clear();
+  this->dataPtr->entityIds.clear();
+  this->dataPtr->modelMsgs.clear();
+  this->dataPtr->posesMsgs.clear();
+  this->dataPtr->sceneMsgs.clear();
 }
 
 //////////////////////////////////////////////////
@@ -513,7 +570,7 @@ void FGzIface::OnModelMsg(TSharedPtr<FJsonObject> _json)
 void FGzIface::OnPoseMsg(TSharedPtr<FJsonObject> _json)
 {
   std::lock_guard<std::mutex> lock(this->dataPtr->msgMutex);
-  this->dataPtr->poseMsgs.push_back(_json);
+  this->dataPtr->posesMsgs.push_back(_json);
 }
 
 //////////////////////////////////////////////////
@@ -624,8 +681,9 @@ bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
 //////////////////////////////////////////////////
 void FGzIface::Tick(float _delta)
 {
-  UE_LOG(LogTemp, Warning, TEXT("---tick %f "), _delta);
+//  UE_LOG(LogTemp, Warning, TEXT("---tick %f "), _delta);
 
+  // Get World
   if (!this->GameWorld())
   {
     // if previously initialized but now we can't find game world,
@@ -635,12 +693,14 @@ void FGzIface::Tick(float _delta)
     return;
   }
 
+  // Init by subscribing to Gz topics
   if (!this->dataPtr->initialized)
   {
     this->Init();
   }
 
-  // process scene message
+  // process scene message to get the initial scene tree
+  // we should only get this message once
   for (auto &s : this->dataPtr->sceneMsgs)
   {
     // FString sceneName = s->GetStringField("name");
@@ -652,27 +712,98 @@ void FGzIface::Tick(float _delta)
   }
   this->dataPtr->sceneMsgs.clear();
 
-  this->Sync();
+  // Sync UE4 to Gz
+  this->UE4ToGzSync();
 
-
-  std::lock_guard<std::mutex> lock(this->dataPtr->msgMutex);
-  // process model message
-  for (auto &m : this->dataPtr->modelMsgs)
-  {
-    this->CreateModelFromMsg(m);
-  }
-  this->dataPtr->modelMsgs.clear();
-
-  // process pose message
-  for (auto &p : this->dataPtr->poseMsgs)
-  {
-//    this->UpdatePoseFromMsg(p);
-  }
-  this->dataPtr->poseMsgs.clear();
-
+  // Sync Gz to UE4
+  this->GzToUE4Sync();
 //  FPlatformProcess::Sleep(1.0);
 
-  UE_LOG(LogTemp, Warning, TEXT("---tick 2 "));
+  // lock step
+  if (this->dataPtr->lockStep)
+  {
+/*    // first UE4 step
+    if (this->dataPtr->targetSimTime <= 0)
+    {
+      // this->dataPtr->targetSimTime = this->GameWorld()->GetTimeSeconds();
+      this->dataPtr->targetSimTime = this->GameWorld()->GetDeltaSeconds();
+      UE_LOG(LogTemp, Warning, TEXT("-----first step time %f"),
+          this->dataPtr->targetSimTime);
+    }
+*/
+
+    // UE4 step size
+    double delta = this->GameWorld()->GetDeltaSeconds();
+
+    // if UE4 is ahead
+    if (this->dataPtr->poseSimTime < this->dataPtr->targetSimTime)
+    {
+      // check if we need to step gazebo
+      if (!this->dataPtr->stepped)
+      {
+        // IMPORTANT: Set UE4 to use a fixed frame rate that is a factor of
+        // Gazebo's physics update rate (1000Hz), e.g. If UE4 is set to run at
+        // 50Hz (at fixed step size of 20ms) then the number of steps for Gazebo
+        // to take will be:
+        //   1000 / 50 = 20 steps
+        // Settings are in Edit > Project Settings > Engine > General Settings.
+        // Make sure the 'Use Fixed Frame Rate' checkbox is checked and specify
+        // a Fixed Frame Rate that is a factor of 1000
+        int gzRate = 1000;
+        int steps = static_cast<int>(std::round(gzRate * delta));
+        this->StepGz(steps);
+        this->dataPtr->stepped = true;
+      }
+
+      this->SetActorsPaused(true);
+    }
+    // if gazebo caught up, we're in sync, now step UE4
+    else
+    {
+      this->SetActorsPaused(false);
+      this->dataPtr->stepped = false;
+
+      this->dataPtr->targetSimTime =
+          this->dataPtr->poseSimTime + delta;
+
+      UE_LOG(LogTemp, Warning, TEXT("--stepping to %f"),
+          this->dataPtr->targetSimTime);
+    }
+
+
+/*
+    // check pose timestamp. If match expected target time, then step,
+    // else pause
+    bool pauseActor = this->dataPtr->poseSimTime < this->dataPtr->targetSimTime;
+    if (pauseActor != this->dataPtr->paused)
+    {
+      this->SetActorsPaused(pauseActor);
+      this->dataPtr->paused = pauseActor;
+      if (!this->dataPtr->paused)
+      {
+        // IMPORTANT: Set UE4 to use a fixed frame rate that is a factor of
+        // Gazebo's physics update rate (1000Hz), e.g. If UE4 is set to run at
+        // 50Hz (at fixed step size of 20ms) then the number of steps for Gazebo
+        // to take will be:
+        //   1000 / 50 = 20 steps
+        // Settings are in Edit > Project Settings > Engine > General Settings.
+        // Make sure the 'Use Fixed Frame Rate' checkbox is checked and specify
+        // a Fixed Frame Rate that is a factor of 1000
+        double delta = this->GameWorld()->GetDeltaSeconds();
+        int gzRate = 1000;
+        int steps = static_cast<int>(std::round(gzRate * delta));
+        this->StepGz(steps);
+        this->dataPtr->targetSimTime =
+            this->dataPtr->poseSimTime + delta;
+
+        UE_LOG(LogTemp, Warning, TEXT("--stepping to %f"),
+            this->dataPtr->targetSimTime);
+      }
+    }
+*/
+  }
+
+  UE_LOG(LogTemp, Warning, TEXT("----------------------tick 2 "));
 }
 
 //////////////////////////////////////////////////
