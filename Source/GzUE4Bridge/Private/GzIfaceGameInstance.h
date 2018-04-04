@@ -15,8 +15,6 @@
  *
 */
 
-
-
 #pragma once
 
 #include "Engine/GameInstance.h"
@@ -67,5 +65,3 @@ class UGzIfaceGameInstance : public UGameInstance
   /// \brief Custom tick function
   FGzTickFunction preTickFunction;
 };
-
-

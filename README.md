@@ -52,7 +52,7 @@ https://wiki.unrealengine.com/Building_On_Linux
 
     Note: You may need to edit `gzue4bridge/Source/GzUE4Bridge/GzUE4Bridge.Build.cs` and update the path to boost library. TODO: need to figure out a cleaner way to do this.
 
-# Configurating Unreal project for lock-stepping with Gazebo
+# Configuring Unreal project for lock-stepping with Gazebo
 
 1. Launch your Unreal project in Unreal Editor
 

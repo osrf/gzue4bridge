@@ -56,26 +56,6 @@ namespace gazebo
       /// Performs synchronization of Unreal and Gazebo
       public: void Tick(float _delta);
 
-/*      /// \brief Overrides FTickableGameObject::Tick
-      /// Performs synchronization of Unreal and Gazebo
-      protected: void Tick(float DeltaTime) override;
-
-      /// \brief Overrides FTickableGameObject::IsTickable
-      /// \return true;
-      protected: bool IsTickable() const override;
-
-      /// \brief Overrides FTickableGameObject::IsTickableInEditor
-      /// \return true;
-      protected: bool IsTickableInEditor() const override;
-
-      /// \brief Overrides FTickableGameObject::IsTickableWhenPaused
-      /// \return false;
-      protected: bool IsTickableWhenPaused() const override;
-
-      /// \brief Overrides FTickableGameObject::GetStatId
-      protected: TStatId GetStatId() const override;
-*/
-
       /// \brief Scene message callback
       /// \param[in] _json JSON message
       private: void OnSceneMsg(TSharedPtr<FJsonObject> _json);
@@ -144,8 +124,5 @@ namespace gazebo
       /// \brief Pointer to private data.
       private: std::unique_ptr<FGzIfacePrivate> dataPtr;
     };
-
-/*    */
-
   }
 }
