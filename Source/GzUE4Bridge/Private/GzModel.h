@@ -28,21 +28,33 @@ class AGzModel : public AActor
 {
 	GENERATED_BODY()
 
-	// Sets default values for this actor's properties
+	/// \brief Sets default values for this actor's properties
   public: AGzModel(const FObjectInitializer& ObjectInitializer);
 
-	// Called every frame
+	/// \brief Called every frame
   public: virtual void Tick(float DeltaTime) override;
 
+  /// \brief Load the model from a json object message
   public: void Load(TSharedPtr<FJsonObject> _json);
 
-	// Called when the game starts or when spawned
+	/// \brief Called when the game starts or when spawned
   protected: virtual void BeginPlay() override;
 
+	/// \brief Load link from json message
+  /// \param[in] _json json message
+  /// \param[in] _parent Parent of link
   private: void LoadLink(TSharedPtr<FJsonObject> _json,
         USceneComponent *_parent);
+
+	/// \brief Load visual from json message
+  /// \param[in] _json json message
+  /// \param[in] _parent Parent of visual
   private: void LoadVisual(TSharedPtr<FJsonObject> _json,
         USceneComponent *_parent);
+
+	/// \brief Load geometry from json message
+  /// \param[in] _json json message
+  /// \param[in] _parent Parent of geometry
   private: void LoadGeometry(TSharedPtr<FJsonObject> _json,
         USceneComponent *_parent);
 

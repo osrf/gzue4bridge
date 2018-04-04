@@ -105,16 +105,16 @@ void GzNode::RunLoop()
 
   while (!this->dataPtr->stop)
   {
-/*    {
-      std::lock_guard<std::mutex> lock(this->dataPtr->handlerMutex);
-      if (this->dataPtr->subHandler.empty());
-        continue;
-    }
-*/
     if (!this->dataPtr->gzWSClient.IsOpen())
     {
       std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(this->dataPtr->handlerMutex);
+      if (this->dataPtr->subHandler.empty())
+        continue;
     }
 
     // process incoming messages from gzbridge
@@ -131,7 +131,8 @@ void GzNode::RunLoop()
           if (opValue == "publish")
           {
             FString topicValue = jsonParsed->GetStringField("topic");
-            UE_LOG(LogTemp, Warning, TEXT("op: %s, topic: %s"), *opValue, *topicValue);
+            TSharedPtr<FJsonObject> msgObj = jsonParsed->GetObjectField("msg");
+            // UE_LOG(LogTemp, Warning, TEXT("op: %s, topic: %s"), *opValue, *topicValue);
             std::lock_guard<std::mutex> lock2(this->dataPtr->handlerMutex);
             std::string str = TCHAR_TO_UTF8(*topicValue);
             auto it = this->dataPtr->subHandler.find(str);
@@ -139,7 +140,7 @@ void GzNode::RunLoop()
             {
               for (auto &cb : it->second)
               {
-                cb(jsonParsed->GetObjectField("msg"));
+                cb(msgObj);
               }
             }
           }
@@ -177,6 +178,22 @@ void GzNode::Subscribe(const std::string &_topic,
             << "}";
 
   this->Send(subReqStr.str());
+}
+
+//////////////////////////////////////////////////
+void GzNode::Publish(const std::string &_topic, TSharedPtr<FJsonObject> _msg)
+{
+  TSharedPtr<FJsonObject> json = MakeShareable(new FJsonObject);
+  json->SetStringField("op", "publish");
+  json->SetStringField("topic", _topic.c_str());
+  json->SetObjectField("msg", _msg);
+
+  FString outputStr;
+  TSharedRef<TJsonWriter<>> writer = TJsonWriterFactory<>::Create(&outputStr);
+  FJsonSerializer::Serialize(json.ToSharedRef(), writer);
+  std::string msg = TCHAR_TO_UTF8(*outputStr);
+//  if (_topic != "~/model/modify")
+  this->Send(msg);
 }
 
 //////////////////////////////////////////////////

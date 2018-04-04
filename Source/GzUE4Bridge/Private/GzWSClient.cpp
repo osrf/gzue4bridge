@@ -93,9 +93,10 @@ void GzWSClient::OnMessage(websocketpp::connection_hdl _hdl,
   if (!this->dataPtr->msgCallback)
     return;
 
-  std::cout << "on_message called with hdl: " << _hdl.lock().get()
+/*  std::cout << "on_message called with hdl: " << _hdl.lock().get()
             << " and message: " << _msg->get_payload()
             << std::endl;
+*/
   this->dataPtr->msgCallback(_msg->get_payload());
 }
 
@@ -166,9 +167,13 @@ void GzWSClient::Run()
   try
   {
     // Set logging to be pretty verbose (everything except message payloads)
-    this->dataPtr->client.set_access_channels(websocketpp::log::alevel::all);
-    this->dataPtr->client.clear_access_channels(
-        websocketpp::log::alevel::frame_payload);
+    // this->dataPtr->client.set_access_channels(websocketpp::log::alevel::all);
+    // this->dataPtr->client.clear_access_channels(
+    //     websocketpp::log::alevel::frame_payload);
+
+    // set verbosity to none
+    this->dataPtr->client.clear_access_channels(websocketpp::log::alevel::all);
+
 
     // Initialize ASIO
     this->dataPtr->client.init_asio();

@@ -16,6 +16,7 @@ More info: http://gazebosim.org/tutorials?tut=gzweb_install&branch=gzweb_1.4
 
     hg clone https://bitbucket.org/gzweb
     cd gzweb
+    hg up pose_msgs
     # we only need websocket server gzbridge this should be sufficient:
     npm run deploy
 
@@ -51,7 +52,7 @@ https://wiki.unrealengine.com/Building_On_Linux
 
     Note: You may need to edit `gzue4bridge/Source/GzUE4Bridge/GzUE4Bridge.Build.cs` and update the path to boost library. TODO: need to figure out a cleaner way to do this.
 
-# Running GzUE4Bridge
+# Configuring Unreal project for lock-stepping with Gazebo
 
 1. Launch your Unreal project in Unreal Editor
 
@@ -60,16 +61,30 @@ https://wiki.unrealengine.com/Building_On_Linux
 
 1. Compile the project and GzUE4Bridge plugin if needed
 
-1. In one terminal, launch gazebo server, e.g.
+1. Set Unreal to use fixed time step and a framerate that is a factor of Gazebo's physics update rate
 
-        gzserver --verbose worlds/shapes.world
+    Edit > Project Settings > Engine > General Settings > Framerate: Make sure `Use Fixed Frame Rate` is checked and set `Fixed Frame Rate` to 50
 
-1. In another terminal, start gzweb's websocket server
+1. Set your project to use GzUE4Bridge's game instance.
+
+    Edit > Project Settings > Project > Maps & Modes > Game Instance: In the drop down list next to `Game Instance Class` select `GzIfaceGameInstance`
+
+# Running GzUE4Bridge
+
+1. In one terminal, launch gazebo server in paused mode, e.g.
+
+        gzserver --verbose -u
+
+1. In another terminal, start gzweb's websocket server with pose filter disabled
 
         cd path/to/gzweb
-        npm start
+        npm start -- -a
 
-    you should see the message `Gazebo transport node connected to gzserver` and a few pose filter param settings.
+    you should see the message:
 
-1. In Unreal Editor, hit the Play button (simulate mode) and you should see gazebo models (simple shapes) appear in the scene
+        Gazebo transport node connected to gzserver.
+        Pose message filter disabled. Messages are published at full rate.
+
+
+1. In Unreal Editor, hit the Play button (simulate mode) to start simulation.
 

@@ -20,7 +20,6 @@
 #include <memory>
 
 #include "CoreMinimal.h"
-#include "Tickable.h"
 
 namespace gazebo
 {
@@ -29,8 +28,8 @@ namespace gazebo
     // forward declaration
     class FGzIfacePrivate;
 
-    /// \brief A interface to gazebo simulation server
-    class FGzIface : public FTickableGameObject
+    /// \brief An interface to Gazebo simulation server
+    class FGzIface
     {
       /// \brief Constructor
       private: FGzIface();
@@ -38,21 +37,24 @@ namespace gazebo
       /// \brief Destructor
     	public: ~FGzIface();
 
+      /// \brief Get an instance of this singleton object
+      /// \return GZIface instance
     	public: static FGzIface &Instance();
 
+      /// \brief Initial Gazebo interface by subscribing to Gazebo topics
     	public: void Init();
-    	public: void Sync();
-    	public: void ShutDown();
 
+      /// \brief Shutdown Gazebo interface.
+    	public: void Shutdown();
+
+      /// \brief Get a pointer to the game world
+      /// \return Pointer to game world. NULL if a world is not available, e.g.
+      /// when game is not runnning.
     	public: UWorld *GameWorld();
 
-      protected: void Tick(float DeltaTime) override;
-      protected: bool IsTickable() const override;
-      protected: bool IsTickableInEditor() const override;
-      protected: bool IsTickableWhenPaused() const override;
-      protected: TStatId GetStatId() const override;
-
-
+      /// \brief Overrides FTickableGameObject::Tick
+      /// Performs synchronization of Unreal and Gazebo
+      public: void Tick(float _delta);
 
       /// \brief Scene message callback
       /// \param[in] _json JSON message
@@ -75,6 +77,48 @@ namespace gazebo
       /// \param[in] _json JSON message
       /// \return True pose update is successful
       private: bool UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json);
+
+      /// \brief Advertise to Gazebo that a new static mesh actor is available
+      /// \param[in] _actor New static mesh actor
+      /// \return True if the actor advertise operation is successful
+    	private: bool AdvertiseStaticMeshActor(AActor *_actor);
+
+      /// \brief Advertise to Gazebo that a new skeletal mesh actor is available
+      /// \param[in] _actor New skeletal actor
+      /// \return True if the advertise operation is successful
+    	private: bool AdvertiseSkeletalMeshActor(AActor *_actor);
+
+      /// \brief Publish to Gazebo the pose of unreal's skeletal mesh actors
+      /// \return True if the pose are published
+    	private: bool PublishSkeletalMeshActor(AActor *_actor);
+
+      /// \brief Request Gazebo to step
+      /// \param[in] _steps Number of steps to take
+      /// \return True if the request is sent successfully
+    	private: bool StepGz(const int _steps);
+
+      /// \brief Set whether to pause unreal actors. This is done by setting
+      /// the custom time dilation.
+      /// \param[in] _paused True to pause, false to unpause
+    	private: void SetActorsPaused(const bool _paused);
+
+      /// \brief Reconstruct Gazebo scene in Unreal
+      /// \return True if the scene is created.
+    	private: bool GzToUE4Scene();
+
+      /// \brief Publish messages to create Unreal models in Gazebo
+      /// \return True if the messages are published
+    	private: bool UE4ToGzModelSync();
+
+      /// \brief Create Gazebo models in Unreal
+      /// \return True if the models are created.
+    	private: bool GzToUE4ModelSync();
+
+      /// \brief Publish messages to update Unreal model pose in Gazebo
+    	private: void UE4ToGzPoseSync();
+
+      /// \brief Update Unreal models' pose based on Gazebo pose messages.
+    	private: void GzToUE4PoseSync();
 
       /// \internal
       /// \brief Pointer to private data.

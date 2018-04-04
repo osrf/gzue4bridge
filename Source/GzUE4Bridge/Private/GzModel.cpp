@@ -64,8 +64,8 @@ void AGzModel::Load(TSharedPtr<FJsonObject> _json)
     FVector pos;
     FRotator rot;
     GzUtil::ParsePose(poseObj, pos, rot);
-    SetActorRotation(GzUtil::CoordTransform(rot));
-    SetActorLocation(GzUtil::CoordTransform(pos));
+    SetActorRotation(GzUtil::GzToUE4(rot));
+    SetActorLocation(GzUtil::GzToUE4(pos));
   }
 }
 
@@ -90,8 +90,8 @@ void AGzModel::LoadLink(TSharedPtr<FJsonObject> _json, USceneComponent *_parent)
     FVector pos;
     FRotator rot;
     GzUtil::ParsePose(poseObj, pos, rot);
-    linkComp->SetRelativeLocation(GzUtil::CoordTransform(pos));
-    linkComp->SetRelativeRotation(GzUtil::CoordTransform(rot));
+    linkComp->SetRelativeLocation(GzUtil::GzToUE4(pos));
+    linkComp->SetRelativeRotation(GzUtil::GzToUE4(rot));
   }
 
   // visual
@@ -127,8 +127,8 @@ void AGzModel::LoadVisual(TSharedPtr<FJsonObject> _json,
     FVector pos;
     FRotator rot;
     GzUtil::ParsePose(poseObj, pos, rot);
-    visualComp->SetRelativeLocation(GzUtil::CoordTransform(pos));
-    visualComp->SetRelativeRotation(GzUtil::CoordTransform(rot));
+    visualComp->SetRelativeLocation(GzUtil::GzToUE4(pos));
+    visualComp->SetRelativeRotation(GzUtil::GzToUE4(rot));
   }
 
   if (_json->HasField("geometry"))
@@ -209,7 +209,7 @@ void AGzModel::LoadGeometry(TSharedPtr<FJsonObject> _json,
   geomComp->Mobility = EComponentMobility::Movable;
   geomComp->AttachToComponent(_parent,
       FAttachmentTransformRules::KeepRelativeTransform);
-  geomComp->SetRelativeLocation(GzUtil::CoordTransform(pos));
+  geomComp->SetRelativeLocation(GzUtil::GzToUE4(pos));
   geomComp->SetRelativeScale3D(scale);
 }
 
