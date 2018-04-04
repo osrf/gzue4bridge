@@ -16,7 +16,7 @@ void FGzUE4BridgeModule::StartupModule()
   // This code will execute after your module is loaded into memory; the exact
   // timing is specified in the .uplugin file per-module
   UE_LOG(LogTemp, Warning, TEXT("Starting up GzUE4Bridge"));
-  FGzIface &iface = FGzIface::Instance();
+//  FGzIface &iface = FGzIface::Instance();
 }
 
 void FGzUE4BridgeModule::ShutdownModule()

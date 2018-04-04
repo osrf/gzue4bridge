@@ -21,6 +21,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -52,6 +53,8 @@ class gazebo::ue4::FGzIfacePrivate
   /// \brief A list actors in the world.
   public: std::map<FString, AActor *> actors;
 
+  public: UWorld *world = nullptr;
+
   /// \brief A list of scene msgs.
   public: std::vector<TSharedPtr<FJsonObject>> sceneMsgs;
 
@@ -66,12 +69,33 @@ class gazebo::ue4::FGzIfacePrivate
 
   /// \brief Flag to indicate if unreal should lock step with Gazebo
   public: bool lockStep = true;
+
+  /// \brief Flag to indicate if unreal has requested gazebo to step
   public: bool stepped = false;
+
+  /// \brief Flag to indicate if unreal needs to publish pose to gazebo
+  public: bool posePublished = false;
+
+  /// \brief Falg to indicate if the unreal actors are paused
   public: bool paused = false;
 
+  /// \brief Target sim time to step gazebo to. This is also unreal's current
+  /// sim time.
   public: double targetSimTime = 0;
+
+  /// \brief The latest gazebo sim time received from a pose message
   public: double poseSimTime = 0;
+
+  /// \brief Entities in unreal that need to be created in Gazebo
+  public: std::set<FString> entityToCreate;
+
+  /// \brief Entity pose in unreal that need to be sync'ed in Gazebo
+  public: std::set<FString> poseToVerify;
+
+  /// \brief Flag to indicate if unreal has received a gazebo scene msg
+  public: bool gzToUE4Scene = false;
 };
+
 
 using namespace gazebo;
 using namespace ue4;
@@ -92,7 +116,7 @@ FGzIface::FGzIface()
 //////////////////////////////////////////////////
 FGzIface::~FGzIface()
 {
-  this->ShutDown();
+  this->Shutdown();
 }
 
 //////////////////////////////////////////////////
@@ -114,11 +138,30 @@ void FGzIface::Init()
 }
 
 //////////////////////////////////////////////////
-void FGzIface::UE4ToGzSync()
+bool FGzIface::GzToUE4Scene()
 {
-  // step unreal
+  std::lock_guard<std::mutex> lock(this->dataPtr->msgMutex);
+  // process scene message to get the initial scene tree
+  // we should only get this message once
+  bool sceneMsgReceived = !this->dataPtr->sceneMsgs.empty();
+  for (auto &s : this->dataPtr->sceneMsgs)
+  {
+    // FString sceneName = s->GetStringField("name");
+    TArray<TSharedPtr<FJsonValue>> models = s->GetArrayField("model");
+    for (auto m :  models)
+    {
+      this->CreateModelFromMsg(m->AsObject());
+    }
+  }
+  this->dataPtr->sceneMsgs.clear();
 
-  // update pose
+  return sceneMsgReceived;
+}
+
+//////////////////////////////////////////////////
+bool FGzIface::UE4ToGzModelSync()
+{
+  // create actors in gazebo
   FString fname;
   for (TActorIterator<AActor> it(this->GameWorld()); it; ++it)
   {
@@ -130,23 +173,23 @@ void FGzIface::UE4ToGzSync()
       this->dataPtr->actors[it->GetName()] = *it;
 
       if (this->AdvertiseStaticMeshActor(*it))
+      {
+        this->dataPtr->entityToCreate.insert(it->GetName());
         continue;
+      }
 
       if (this->AdvertiseSkeletalMeshActor(*it))
+      {
+        this->dataPtr->entityToCreate.insert(it->GetName());
         continue;
+      }
     }
-
-    // TODO uncomment me
-    // this->PublishSkeletalMeshActor(*it);
-
   }
-
-  // wait for gazebo pose update to finish
-  // look for timestamp in pose
+  return true;
 }
 
 //////////////////////////////////////////////////
-void FGzIface::GzToUE4Sync()
+bool FGzIface::GzToUE4ModelSync()
 {
   std::lock_guard<std::mutex> lock(this->dataPtr->msgMutex);
 
@@ -157,6 +200,32 @@ void FGzIface::GzToUE4Sync()
   }
   this->dataPtr->modelMsgs.clear();
 
+  return true;
+}
+
+//////////////////////////////////////////////////
+void FGzIface::UE4ToGzPoseSync()
+{
+  // publish new pose if gazebo is not being stepped, which means
+  // unreal has just stepped
+  if (this->dataPtr->lockStep && this->dataPtr->posePublished)
+    return;
+
+  // update pose
+  FString fname;
+  for (TActorIterator<AActor> it(this->GameWorld()); it; ++it)
+  {
+    // publish skeletal mesh actor pose to gazebo
+    this->PublishSkeletalMeshActor(*it);
+  }
+  this->dataPtr->posePublished = true;
+}
+
+//////////////////////////////////////////////////
+void FGzIface::GzToUE4PoseSync()
+{
+  std::lock_guard<std::mutex> lock(this->dataPtr->msgMutex);
+
   // process pose message
   // TODO optimize and process only last pose message?
   for (auto &ps : this->dataPtr->posesMsgs)
@@ -166,7 +235,9 @@ void FGzIface::GzToUE4Sync()
     this->dataPtr->poseSimTime = timeObj->GetNumberField("sec") +
         timeObj->GetNumberField("nsec")/1e9;
 
-    UE_LOG(LogTemp, Warning, TEXT("=== pose time: %f"), this->dataPtr->poseSimTime);
+//    UE_LOG(LogTemp, Warning, TEXT("=== pose time: %d, %f"),
+//        this->dataPtr->posesMsgs.size(),
+//        this->dataPtr->poseSimTime);
 
     TArray<TSharedPtr<FJsonValue>> poses = ps->GetArrayField("pose");
     for (auto p : poses)
@@ -188,7 +259,7 @@ bool FGzIface::AdvertiseStaticMeshActor(AActor *_actor)
   if (meshComps.Num() <= 0)
     return false;
 
-  UE_LOG(LogTemp, Warning, TEXT("=== name: %s"), *(_actor->GetName()));
+//  UE_LOG(LogTemp, Warning, TEXT("=== name: %s"), *(_actor->GetName()));
   for (auto comp : meshComps)
   {
     UStaticMesh *mesh = comp->GetStaticMesh();
@@ -207,17 +278,18 @@ bool FGzIface::AdvertiseStaticMeshActor(AActor *_actor)
 
     // large mesh == skybox? skip
     if (size.X >= 32768 || size.Y >= 32768 || size.Z >= 32768)
-      continue;
+      return false;
 
     FVector pos = comp->GetComponentLocation();
     FRotator rot = comp->GetComponentRotation();
 
-    UE_LOG(LogTemp, Warning, TEXT(" min: %f, %f, %f"), min.X, min.Y, min.Z);
+/*    UE_LOG(LogTemp, Warning, TEXT(" min: %f, %f, %f"), min.X, min.Y, min.Z);
     UE_LOG(LogTemp, Warning, TEXT(" max: %f, %f, %f"), max.X, max.Y, max.Z);
     UE_LOG(LogTemp, Warning, TEXT(" pos: %f, %f, %f"), pos.X, pos.Y, pos.Z);
     UE_LOG(LogTemp, Warning, TEXT(" rot: %f, %f, %f"), rot.Roll, rot.Pitch, rot.Yaw);
     UE_LOG(LogTemp, Warning, TEXT(" scale: %f, %f, %f"), scale.X, scale.Y, scale.Z);
     UE_LOG(LogTemp, Warning, TEXT(" center: %f, %f, %f"), center.X, center.Y, center.Z);
+*/
 
     center *= scale;
     center = GzUtil::UE4ToGz(center);
@@ -272,7 +344,7 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
   if (meshComps.Num() <= 0)
     return false;
 
-  UE_LOG(LogTemp, Warning, TEXT("=== skeleton name: %s"), *(_actor->GetName()));
+//  UE_LOG(LogTemp, Warning, TEXT("=== skeleton name: %s"), *(_actor->GetName()));
   for (auto comp : meshComps)
   {
 //    USkeletalMesh *mesh = comp->GetMesh();
@@ -290,9 +362,9 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
     TArray<FName> boneNames;
     comp->GetBoneNames(boneNames);
 
-    UE_LOG(LogTemp, Warning, TEXT(" Required bones: %d"), boneIndices.Num());
-    UE_LOG(LogTemp, Warning, TEXT(" bone name size: %d"), boneNames.Num());
-    UE_LOG(LogTemp, Warning, TEXT(" bone transformss: %d"), boneTransforms.Num());
+//    UE_LOG(LogTemp, Warning, TEXT(" Required bones: %d"), boneIndices.Num());
+//    UE_LOG(LogTemp, Warning, TEXT(" bone name size: %d"), boneNames.Num());
+//    UE_LOG(LogTemp, Warning, TEXT(" bone transformss: %d"), boneTransforms.Num());
 
 /*    for (auto n : boneTransforms)
     {
@@ -386,19 +458,6 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
 //////////////////////////////////////////////////
 bool FGzIface::PublishSkeletalMeshActor(AActor *_actor)
 {
-    /////// testing/////
-  //_actor->SetActorTickEnabled(false);
-  //_actor->Tick(1);
-  /*double delta = this->GameWorld()->GetDeltaSeconds();
-  double targetRate = 1000.0;
-  double stepSize = 1/targetRate;
-  double timeDil = stepSize / delta;
-  _actor->CustomTimeDilation = timeDil;
-  UE_LOG(LogTemp, Warning, TEXT(" time dilation %f "), timeDil);
-  */
-    /////// testing/////
-
-  // uncomment after testing
   // see if unique id is available
   auto it = this->dataPtr->entityIds.find(_actor->GetName());
   if (it == this->dataPtr->entityIds.end())
@@ -414,14 +473,6 @@ bool FGzIface::PublishSkeletalMeshActor(AActor *_actor)
 
   for (auto comp : meshComps)
   {
-
-    /////// testing/////
-    //comp->bPauseAnims = false;
-    //comp->TickPose(0.1, false);
-    //comp->bPauseAnims = true;
-    //continue;
-    /////// testing/////
-
     TSharedPtr<FJsonObject> msg = MakeShareable(new FJsonObject);
     msg->SetStringField("name", _actor->GetName());
     msg->SetNumberField("id", modelId);
@@ -494,9 +545,13 @@ bool FGzIface::PublishSkeletalMeshActor(AActor *_actor)
       linkArrayObj.Add(linkValue);
     }
     msg->SetArrayField("link", linkArrayObj);
-    UE_LOG(LogTemp, Warning, TEXT("   update skeletal 2"));
 
     this->dataPtr->node->Publish("~/model/modify", msg);
+
+    // remember the model name so we can verify its pose has been received by
+    // gazebo
+    this->dataPtr->poseToVerify.insert(_actor->GetName());
+    // UE_LOG(LogTemp, Warning, TEXT("===  pub model pose: %s"), *_actor->GetName());
   }
 
   return true;
@@ -527,8 +582,8 @@ void FGzIface::SetActorsPaused(const bool _paused)
   FString fname;
   for (TActorIterator<AActor> it(this->GameWorld()); it; ++it)
   {
-    if (this->dataPtr->actors.find(it->GetName()) !=
-        this->dataPtr->actors.end())
+//    if (this->dataPtr->actors.find(it->GetName()) !=
+//        this->dataPtr->actors.end())
     {
       (*it)->CustomTimeDilation = timeDilation;
     }
@@ -536,7 +591,7 @@ void FGzIface::SetActorsPaused(const bool _paused)
 }
 
 //////////////////////////////////////////////////
-void FGzIface::ShutDown()
+void FGzIface::Shutdown()
 {
   delete this->dataPtr->node;
   this->dataPtr->node = nullptr;
@@ -544,12 +599,18 @@ void FGzIface::ShutDown()
   this->dataPtr->targetSimTime = 0;
   this->dataPtr->poseSimTime = 0;
   this->dataPtr->paused = false;
+  this->dataPtr->stepped = false;
+  this->dataPtr->posePublished = false;
+  this->dataPtr->gzToUE4Scene = false;
+  this->dataPtr->world = nullptr;
 
   this->dataPtr->actors.clear();
   this->dataPtr->entityIds.clear();
   this->dataPtr->modelMsgs.clear();
   this->dataPtr->posesMsgs.clear();
   this->dataPtr->sceneMsgs.clear();
+  this->dataPtr->entityToCreate.clear();
+  this->dataPtr->poseToVerify.clear();
 }
 
 //////////////////////////////////////////////////
@@ -577,7 +638,10 @@ void FGzIface::OnPoseMsg(TSharedPtr<FJsonObject> _json)
 bool FGzIface::CreateModelFromMsg(TSharedPtr<FJsonObject> _json)
 {
   FString modelName = _json->GetStringField("name");
-  // this is a gazebo model that does not exist in UE
+
+  // UE_LOG(LogTemp, Warning, TEXT("   model name: %s"), *modelName);
+
+  // if a gazebo model does not exist in UE, add it to the actors map
   if (this->dataPtr->actors.find(modelName) == this->dataPtr->actors.end())
   {
     FVector pos(0, 0, 0);
@@ -587,6 +651,7 @@ bool FGzIface::CreateModelFromMsg(TSharedPtr<FJsonObject> _json)
     AGzModel* model =
         this->GameWorld()->SpawnActor<AGzModel>(pos, rot, spawnParams);
     model->Load(_json);
+    model->CustomTimeDilation = this->dataPtr->lockStep ? 0 : 1;
     this->dataPtr->actors[model->GetName()] = model;
   }
 
@@ -607,14 +672,28 @@ bool FGzIface::CreateModelFromMsg(TSharedPtr<FJsonObject> _json)
     }
   }
 
+  // remove entry in entity to create so that we know it's been created in
+  // gazebo.
+  auto entIt = this->dataPtr->entityToCreate.find(modelName);
+  if (entIt != this->dataPtr->entityToCreate.end())
+  {
+    this->dataPtr->entityToCreate.erase(entIt);
+  }
+
+  // remove entry in pose to create set so that we know it's been updated in
+  // gazebo.
+  auto poseIt = this->dataPtr->poseToVerify.find(modelName);
+  if (poseIt != this->dataPtr->poseToVerify.end())
+  {
+    this->dataPtr->poseToVerify.erase(poseIt);
+  }
+
   return true;
 }
 
 //////////////////////////////////////////////////
 bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
 {
-  UE_LOG(LogTemp, Warning, TEXT(" ===== update pose from msg 0"));
-
   if (!_json.IsValid())
     return false;
 
@@ -677,19 +756,14 @@ bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
   return false;
 }
 
-
 //////////////////////////////////////////////////
 void FGzIface::Tick(float _delta)
 {
-//  UE_LOG(LogTemp, Warning, TEXT("---tick %f "), _delta);
-
   // Get World
   if (!this->GameWorld())
   {
-    // if previously initialized but now we can't find game world,
-    // this probably means we're playing in editor, so shut down gznode.
     if (this->dataPtr->initialized)
-      this->ShutDown();
+      this->Shutdown();
     return;
   }
 
@@ -699,38 +773,66 @@ void FGzIface::Tick(float _delta)
     this->Init();
   }
 
-  // process scene message to get the initial scene tree
-  // we should only get this message once
-  for (auto &s : this->dataPtr->sceneMsgs)
+  // pause the actors if we're lockstepping
+  if (this->dataPtr->lockStep)
+    this->SetActorsPaused(true);
+
+  ////////////////////
+  // Sync Scene
+  ////////////////////
+
+  // Reconstruct gazebo scene in UE4
+  if (!this->dataPtr->gzToUE4Scene)
   {
-    // FString sceneName = s->GetStringField("name");
-    TArray<TSharedPtr<FJsonValue>> models = s->GetArrayField("model");
-    for (auto m :  models)
-    {
-      this->CreateModelFromMsg(m->AsObject());
-    }
+    if (this->GzToUE4Scene())
+      this->dataPtr->gzToUE4Scene = true;
+    else
+      return;
   }
-  this->dataPtr->sceneMsgs.clear();
 
-  // Sync UE4 to Gz
-  this->UE4ToGzSync();
+  ////////////////////
+  // Sync Models
+  ////////////////////
 
-  // Sync Gz to UE4
-  this->GzToUE4Sync();
-//  FPlatformProcess::Sleep(1.0);
+  // Create UE4 models in gazebo
+  this->UE4ToGzModelSync();
+
+  // Create gazebo models in UE4
+  this->GzToUE4ModelSync();
+
+  // Wait and verify UE4 models are created in gazebo before stepping.
+  if (this->dataPtr->lockStep && !this->dataPtr->entityToCreate.empty())
+    return;
+
+  ////////////////////
+  // Sync Pose
+  ////////////////////
+
+  // Sync UE4 model pose to Gz
+  this->UE4ToGzPoseSync();
+
+  // Sync Gz model pose to UE4
+  this->GzToUE4PoseSync();
+
+  // Wait and verify UE4 model pose are updated in gazebo before stepping.
+  if (this->dataPtr->lockStep && !this->dataPtr->poseToVerify.empty())
+    return;
+
+  ////////////////////
+  // Step
+  ////////////////////
 
   // lock step
   if (this->dataPtr->lockStep)
   {
-/*    // first UE4 step
+    // first UE4 step
     if (this->dataPtr->targetSimTime <= 0)
     {
       // this->dataPtr->targetSimTime = this->GameWorld()->GetTimeSeconds();
       this->dataPtr->targetSimTime = this->GameWorld()->GetDeltaSeconds();
-      UE_LOG(LogTemp, Warning, TEXT("-----first step time %f"),
-          this->dataPtr->targetSimTime);
+      // UE_LOG(LogTemp, Warning, TEXT("-----first step time %f"),
+      //     this->dataPtr->targetSimTime);
     }
-*/
 
     // UE4 step size
     double delta = this->GameWorld()->GetDeltaSeconds();
@@ -755,57 +857,25 @@ void FGzIface::Tick(float _delta)
         this->dataPtr->stepped = true;
       }
 
-      this->SetActorsPaused(true);
+      // this->SetActorsPaused(true);
     }
     // if gazebo caught up, we're in sync, now step UE4
     else
     {
-      this->SetActorsPaused(false);
-      this->dataPtr->stepped = false;
-
       this->dataPtr->targetSimTime =
           this->dataPtr->poseSimTime + delta;
 
-      UE_LOG(LogTemp, Warning, TEXT("--stepping to %f"),
-          this->dataPtr->targetSimTime);
+      this->SetActorsPaused(false);
+      this->dataPtr->stepped = false;
+      this->dataPtr->posePublished = false;
+
+//      UE_LOG(LogTemp, Warning, TEXT("--stepping to %f"),
+//          this->dataPtr->targetSimTime);
     }
-
-
-/*
-    // check pose timestamp. If match expected target time, then step,
-    // else pause
-    bool pauseActor = this->dataPtr->poseSimTime < this->dataPtr->targetSimTime;
-    if (pauseActor != this->dataPtr->paused)
-    {
-      this->SetActorsPaused(pauseActor);
-      this->dataPtr->paused = pauseActor;
-      if (!this->dataPtr->paused)
-      {
-        // IMPORTANT: Set UE4 to use a fixed frame rate that is a factor of
-        // Gazebo's physics update rate (1000Hz), e.g. If UE4 is set to run at
-        // 50Hz (at fixed step size of 20ms) then the number of steps for Gazebo
-        // to take will be:
-        //   1000 / 50 = 20 steps
-        // Settings are in Edit > Project Settings > Engine > General Settings.
-        // Make sure the 'Use Fixed Frame Rate' checkbox is checked and specify
-        // a Fixed Frame Rate that is a factor of 1000
-        double delta = this->GameWorld()->GetDeltaSeconds();
-        int gzRate = 1000;
-        int steps = static_cast<int>(std::round(gzRate * delta));
-        this->StepGz(steps);
-        this->dataPtr->targetSimTime =
-            this->dataPtr->poseSimTime + delta;
-
-        UE_LOG(LogTemp, Warning, TEXT("--stepping to %f"),
-            this->dataPtr->targetSimTime);
-      }
-    }
-*/
   }
-
-  UE_LOG(LogTemp, Warning, TEXT("----------------------tick 2 "));
 }
 
+/*
 //////////////////////////////////////////////////
 bool FGzIface::IsTickable() const
 {
@@ -832,10 +902,14 @@ TStatId FGzIface::GetStatId() const
 {
   return TStatId();
 }
+*/
 
 //////////////////////////////////////////////////
 UWorld *FGzIface::GameWorld()
 {
+  if (this->dataPtr->world)
+    return this->dataPtr->world;
+
   UWorld* world = nullptr;
 
   // TODO: check which macro can determine whether I am in editor
@@ -846,6 +920,7 @@ UWorld *FGzIface::GameWorld()
     world = EditorEngine->PlayWorld;
     if (world && world->IsValidLowLevel() && world->IsGameWorld())
     {
+      this->dataPtr->world = world;
       return world;
     }
     else
@@ -863,6 +938,7 @@ UWorld *FGzIface::GameWorld()
     world = gameEngine->GetGameWorld();
     if (world && world->IsValidLowLevel())
     {
+      this->dataPtr->world = world;
       return world;
     }
     else
