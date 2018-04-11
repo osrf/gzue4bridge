@@ -56,8 +56,8 @@ FVector GzUtil::GzToUE4(const FVector &_pos)
 FRotator GzUtil::GzToUE4(const FRotator &_rot)
 {
   // Convert rotations
-  FRotator rot(FQuat(FVector::UpVector, -FMath::DegreesToRadians(_rot.Yaw)) *
-      FQuat(FVector::RightVector, -FMath::DegreesToRadians(_rot.Pitch)) *
+  FRotator rot(FQuat(FVector::UpVector, FMath::DegreesToRadians(-_rot.Yaw)) *
+      FQuat(FVector::RightVector, FMath::DegreesToRadians(-_rot.Pitch)) *
       FQuat(FVector::ForwardVector, FMath::DegreesToRadians(_rot.Roll)));
 
   return rot;
@@ -73,9 +73,9 @@ FVector GzUtil::UE4ToGz(const FVector &_pos)
 FRotator GzUtil::UE4ToGz(const FRotator &_rot)
 {
   // Convert rotations
-  FRotator rot(FQuat(FVector::UpVector, -FMath::DegreesToRadians(_rot.Yaw)) *
-      FQuat(FVector::RightVector, -FMath::DegreesToRadians(_rot.Pitch)) *
-      FQuat(FVector::ForwardVector, FMath::DegreesToRadians(_rot.Roll)));
+  FRotator rot(FQuat(FVector::UpVector, FMath::DegreesToRadians(-_rot.Yaw)) *
+      FQuat(FVector::RightVector, FMath::DegreesToRadians(_rot.Pitch)) *
+      FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-_rot.Roll)));
 
   return rot;
 }
