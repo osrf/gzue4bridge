@@ -307,7 +307,9 @@ bool FGzIface::AdvertiseStaticMeshActor(AActor *_actor)
                 <<   "<static>true</static>"
                 <<   "<pose>"
                 <<     pos.X << " " << pos.Y << " " << pos.Z << " "
-                <<     rot.Roll << " " << rot.Pitch << " " << rot.Yaw
+                <<     FMath::DegreesToRadians(rot.Roll) << " "
+                <<     FMath::DegreesToRadians(rot.Pitch) << " "
+                <<     FMath::DegreesToRadians(rot.Yaw)
                 <<   "</pose>"
                 <<   "<link name='link'>"
                 <<     pivotStr.str()
@@ -337,9 +339,29 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
 
   for (auto comp : meshComps)
   {
-//    USkeletalMesh *mesh = comp->GetMesh();
-//    if (!mesh)
-//      continue;
+/*    USkeletalMesh *mesh = comp->SkeletalMesh;
+    if (!mesh)
+      continue;
+    UE_LOG(LogTemp, Warning, TEXT(" mesh bone mirror : %d"), mesh->SkelMirrorTable.Num());
+
+    for (int i = 0; i < mesh->SkelMirrorTable.Num(); ++i)
+    {
+      int idx  = mesh->SkelMirrorTable[i].SourceIndex;
+      UE_LOG(LogTemp, Warning, TEXT(" source idx: %d"), idx);
+
+      FName bName = comp->GetBoneName(i);
+      UE_LOG(LogTemp, Warning, TEXT(" bName: %s"), *bName.ToString());
+    }
+*/
+
+    // FSkeletalMeshRenderData renderData =
+//    TArray<FBoneIndexType> activeBoneIndices =
+//      comp->GetSkeletalMeshResource()->LODModels[0].ActiveBoneIndices;
+//    UE_LOG(LogTemp, Warning, TEXT(" mesh bone indices: %d"),
+//      static_cast<int>(boneIndices.Num()));
+
+
+
 
     FVector pos = comp->GetComponentLocation();
     FRotator rot = comp->GetComponentRotation();
@@ -347,10 +369,10 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
     pos = GzUtil::UE4ToGz(pos);
     rot = GzUtil::UE4ToGz(rot);
 
-    TArray<FBoneIndexType> boneIndices = comp->RequiredBones;
-    TArray<FTransform> boneTransforms = comp->BoneSpaceTransforms;
-    TArray<FName> boneNames;
-    comp->GetBoneNames(boneNames);
+//    TArray<FBoneIndexType> boneIndices = comp->RequiredBones;
+//    TArray<FTransform> boneTransforms = comp->BoneSpaceTransforms;
+//    TArray<FName> boneNames;
+//    comp->GetBoneNames(boneNames);
 
 //    UE_LOG(LogTemp, Warning, TEXT(" Required bones: %d"), boneIndices.Num());
 //    UE_LOG(LogTemp, Warning, TEXT(" bone name size: %d"), boneNames.Num());
@@ -394,11 +416,24 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
     msg->SetStringField("name", _actor->GetName());
     msg->SetStringField("type", "sdf");
 
-    double radius = 0.02;
-    std::stringstream geomStr;
-    geomStr << "<geometry><sphere><radius>"
-            <<  radius
-            << "</radius></sphere></geometry>";
+    double jointRadius = 0.01;
+    std::stringstream jointGeomStr;
+    jointGeomStr << "<geometry><sphere>"
+            << "<radius>"<<  jointRadius << "</radius>"
+            << "</sphere></geometry>";
+
+    std::string jointDiffuseStr = "1 1 0 1";
+    std::stringstream jointVisMatStr;
+    jointVisMatStr << "<material>"
+            << "<diffuse>"<<  jointDiffuseStr << "</diffuse>"
+            << "</material>";
+
+    std::string boneDiffuseStr = "0 0 0.4 1";
+    std::stringstream boneVisMatStr;
+    boneVisMatStr << "<material>"
+            << "<diffuse>"<<  boneDiffuseStr << "</diffuse>"
+            << "</material>";
+
 
     std::stringstream newModelStr;
     newModelStr << "<sdf version ='" << SDF_VERSION << "'>"
@@ -409,35 +444,137 @@ bool FGzIface::AdvertiseSkeletalMeshActor(AActor *_actor)
                 <<      rot.Roll << " " << rot.Pitch << " " << rot.Yaw
                 <<   "</pose>";
 
-    for (int i = 0; i < comp->GetNumBones(); ++i)
-    {
-      FName boneName = comp->GetBoneName(i);
-      std::string nameStr = TCHAR_TO_UTF8(*boneName.ToString());
-      FVector bonePos =
-          comp->GetBoneLocation(boneName, EBoneSpaces::ComponentSpace);
-      FQuat boneQuat =
-          comp->GetBoneQuaternion(boneName, EBoneSpaces::ComponentSpace);
+    std::map<FName, FVector> bonePoseMap;
+//    for (int i = 0; i < comp->GetNumBones(); ++i)
+    // loop through only the bones that are active in this skeletal mesh,
+    // which helps to ignore bones without weight, e.g. IK bones
+    TArray<FBoneIndexType> activeBoneIndices =
+      comp->GetSkeletalMeshResource()->LODModels[0].ActiveBoneIndices;
 
-      bonePos = GzUtil::UE4ToGz(bonePos);
-      FRotator boneRot = GzUtil::UE4ToGz(FRotator(boneQuat));
+    std::set<int> boneIndices;
+    for (int i = 0; i < activeBoneIndices.Num();++i)
+    {
+      FBoneIndexType idx = activeBoneIndices[i];
+//      UE_LOG(LogTemp, Warning, TEXT("   mesh index: %d"),
+//        static_cast<int>(idx));
+      boneIndices.insert(static_cast<int>(idx));
+    }
+//    for (int i = 0; i < activeBoneIndices.Num(); ++i)
+    for (int i = 0; i < comp->GetNumBones(); ++i)
+//    for (unsigned int i = 0; i < boneIndices.size(); ++i)
+    {
+//      FBoneIndexType idx = activeBoneIndices[i];
+      if (boneIndices.find(i) == boneIndices.end())
+        continue;
+
+      // current bone
+//      FName boneName = comp->GetBoneName(static_cast<int>(idx));
+      FName boneName = comp->GetBoneName(i);
+      FVector bonePos;
+      auto bIt = bonePoseMap.find(boneName);
+      if (bIt == bonePoseMap.end())
+      {
+        bonePos =
+            comp->GetBoneLocation(boneName, EBoneSpaces::ComponentSpace);
+        bonePos = GzUtil::UE4ToGz(bonePos);
+        bonePoseMap[boneName] = bonePos;
+      }
+      else
+      {
+        bonePos = bIt->second;
+      }
+
+      FVector bonePosMid(0, 0, 0);
+      FRotator boneRotMid(0, 0, 0);;
+      double boneLength = 0.0;
+
+      // parent bone
+      FName boneParentName = comp->GetParentBone(boneName);
+      int boneParentIdx = comp->GetBoneIndex(boneParentName);
+      if (!boneParentName.IsNone() &&
+          boneIndices.find(boneParentIdx) != boneIndices.end())
+      {
+        FVector boneParentPos;
+        bIt = bonePoseMap.find(boneParentName);
+        if (bIt == bonePoseMap.end())
+        {
+          boneParentPos =
+              comp->GetBoneLocation(boneParentName, EBoneSpaces::ComponentSpace);
+          boneParentPos = GzUtil::UE4ToGz(boneParentPos);
+          bonePoseMap[boneParentName] = boneParentPos;
+        }
+        else
+        {
+          boneParentPos = bIt->second;
+        }
+        FVector dBonePos = boneParentPos - bonePos;
+        boneLength = std::fabs(dBonePos.Size());
+        if (!FMath::IsNearlyEqual(boneLength, 0, 1e-3))
+        {
+          bonePosMid = FVector(0, 0, boneLength * 0.5);
+          FVector u = dBonePos.GetSafeNormal();
+          FVector v(0, 0, 1);
+          FQuat q = FQuat::FindBetweenVectors(v, u);
+          // TODO figure out why negate
+          FRotator r(q);
+          r.Yaw = -r.Yaw;
+          r.Roll= -r.Roll;
+          boneRotMid = GzUtil::UE4ToGz(r);
+        }
+      }
+
+      // create the joints and bones
+      std::stringstream jointPoseStr;
+      jointPoseStr << "<pose>"
+                   << bonePos.X << " " << bonePos.Y << " " << bonePos.Z << " "
+                   << FMath::DegreesToRadians(boneRotMid.Roll) << " "
+                   << FMath::DegreesToRadians(boneRotMid.Pitch) << " "
+                   << FMath::DegreesToRadians(boneRotMid.Yaw)
+                   << "</pose>";
+
       std::stringstream bonePoseStr;
       bonePoseStr << "<pose>"
-                  << bonePos.X << " " << bonePos.Y << " " << bonePos.Z << " "
-                  << boneRot.Roll << " " << boneRot.Pitch << " " << boneRot.Yaw
-                  << "</pose>";
+                  << bonePosMid.X << " "
+                  << bonePosMid.Y << " "
+                  << bonePosMid.Z << " "
+                  << "0 0 0</pose>";
 
-      newModelStr <<   "<link name='" << nameStr << "'>"
-                  <<     bonePoseStr.str()
-                  <<     "<visual name='visual'>"
-                  <<       geomStr.str()
-                  <<     "</visual>"
-                  <<     "<collision name='collision'>"
-                  <<       geomStr.str()
-                  <<     "</collision>"
-                  <<   "</link>";
+      std::string nameStr = TCHAR_TO_UTF8(*boneName.ToString());
+      newModelStr << "<link name='" << nameStr << "'>"
+                  <<   jointPoseStr.str()
+                  <<   "<visual name='joint_visual'>"
+                  <<     jointGeomStr.str()
+                  <<     jointVisMatStr.str()
+                  <<   "</visual>"
+                  <<   "<collision name='joint_collision'>"
+                  <<     jointGeomStr.str()
+                  <<   "</collision>";
+
+      // add bone visual only if length is > 0
+      if (!FMath::IsNearlyEqual(boneLength, 0))
+      {
+        double boneRadius = 0.005;
+        std::stringstream boneGeomStr;
+        boneGeomStr << "<geometry><cylinder>"
+                << "<radius>"<<  boneRadius << "</radius>"
+                << "<length>"<< boneLength << "</length>"
+                << "</cylinder></geometry>";
+
+        newModelStr <<   "<visual name='bone_visual'>"
+                    <<     bonePoseStr.str()
+                    <<     boneGeomStr.str()
+                    <<     boneVisMatStr.str()
+                    <<   "</visual>"
+                    <<   "<collision name='bone_collision'>"
+                    <<     bonePoseStr.str()
+                    <<     boneGeomStr.str()
+                    <<   "</collision>";
+      }
+      newModelStr << "</link>";
     }
     newModelStr << "</model>"
                 << "</sdf>";
+
     msg->SetStringField("sdf", newModelStr.str().c_str());
 
     this->dataPtr->node->Publish("~/factory", msg);
@@ -489,24 +626,87 @@ bool FGzIface::PublishSkeletalMeshActor(AActor *_actor)
 
     TArray<TSharedPtr<FJsonValue>> linkArrayObj;
 
-    for (int i = 0; i < comp->GetNumBones(); ++i)
+    std::map<FName, FVector> bonePoseMap;
+
+    TArray<FBoneIndexType> activeBoneIndices =
+      comp->GetSkeletalMeshResource()->LODModels[0].ActiveBoneIndices;
+    std::set<int> boneIndices;
+    for (int i = 0; i < activeBoneIndices.Num();++i)
     {
+      FBoneIndexType idx = activeBoneIndices[i];
+      boneIndices.insert(static_cast<int>(idx));
+    }
+
+    for (int i = 0; i < comp->GetNumBones(); ++i)
+//    for (unsigned int i = 0; i < boneIndices.size(); ++i)
+    {
+      if (boneIndices.find(i) == boneIndices.end())
+        continue;
+
+      // current bone
       FName boneName = comp->GetBoneName(i);
+//      FName boneName = comp->GetBoneName(static_cast<int>(idx));
       FString boneNameScoped = _actor->GetName() + "::" + boneName.ToString();
+
       // see if unique id is available
       auto lIt = this->dataPtr->entityIds.find(boneNameScoped);
       if (lIt == this->dataPtr->entityIds.end())
         continue;
       int linkId = lIt->second;
 
-      FVector bonePos =
-          comp->GetBoneLocation(boneName, EBoneSpaces::ComponentSpace);
-      FQuat boneQuat =
-          comp->GetBoneQuaternion(boneName, EBoneSpaces::ComponentSpace);
+      // joint
+      FVector bonePos;
 
-      bonePos = GzUtil::UE4ToGz(bonePos);
-      FRotator boneRot = GzUtil::UE4ToGz(FRotator(boneQuat));
-      boneQuat = boneRot.Quaternion();
+      auto bIt = bonePoseMap.find(boneName);
+      if (bIt == bonePoseMap.end())
+      {
+        bonePos =
+            comp->GetBoneLocation(boneName, EBoneSpaces::ComponentSpace);
+        bonePos = GzUtil::UE4ToGz(bonePos);
+        bonePoseMap[boneName] = bonePos;
+      }
+      else
+      {
+        bonePos = bIt->second;
+      }
+
+      FVector bonePosMid(0, 0, 0);
+      FQuat boneQuatMid(0, 0, 0, 1);;
+      double boneLength = 0.0;
+
+      // parent bone
+      FName boneParentName = comp->GetParentBone(boneName);
+      int boneParentIdx = comp->GetBoneIndex(boneParentName);
+      if (!boneParentName.IsNone() &&
+          boneIndices.find(boneParentIdx) != boneIndices.end())
+      {
+
+        FVector boneParentPos;
+        FQuat boneParentQuat;
+
+        bIt = bonePoseMap.find(boneParentName);
+        if (bIt == bonePoseMap.end())
+        {
+          boneParentPos =
+              comp->GetBoneLocation(boneParentName, EBoneSpaces::ComponentSpace);
+          boneParentPos = GzUtil::UE4ToGz(boneParentPos);
+          bonePoseMap[boneParentName] = boneParentPos;
+        }
+        else
+        {
+          boneParentPos = bIt->second;
+        }
+
+        FVector dBonePos = boneParentPos - bonePos;
+        boneLength = std::fabs(dBonePos.Size());
+        if (!FMath::IsNearlyEqual(boneLength, 0, 1e-3))
+        {
+          bonePosMid = FVector(0, 0, boneLength * 0.5);
+          FVector u = dBonePos.GetSafeNormal();
+          FVector v(0, 0, 1);
+          boneQuatMid = FQuat::FindBetweenVectors(v, u);
+        }
+      }
 
       TSharedPtr< FJsonObject > linkObj = MakeShareable(new FJsonObject);
       linkObj->SetStringField("name", boneNameScoped);
@@ -517,10 +717,10 @@ bool FGzIface::PublishSkeletalMeshActor(AActor *_actor)
       linkPosObj->SetNumberField("y", bonePos.Y);
       linkPosObj->SetNumberField("z", bonePos.Z);
       TSharedPtr< FJsonObject > linkQuatObj = MakeShareable(new FJsonObject);
-      linkQuatObj->SetNumberField("w", boneQuat.W);
-      linkQuatObj->SetNumberField("x", boneQuat.X);
-      linkQuatObj->SetNumberField("y", boneQuat.Y);
-      linkQuatObj->SetNumberField("z", boneQuat.Z);
+      linkQuatObj->SetNumberField("w", boneQuatMid.W);
+      linkQuatObj->SetNumberField("x", boneQuatMid.X);
+      linkQuatObj->SetNumberField("y", boneQuatMid.Y);
+      linkQuatObj->SetNumberField("z", boneQuatMid.Z);
       linkObj->SetObjectField("position", linkPosObj);
       linkObj->SetObjectField("orientation", linkQuatObj);
 
@@ -589,6 +789,7 @@ void FGzIface::Shutdown()
   this->dataPtr->gzToUE4Scene = false;
   this->dataPtr->world = nullptr;
 
+  this->dataPtr->actors.clear();
   this->dataPtr->entityIds.clear();
   this->dataPtr->modelMsgs.clear();
   this->dataPtr->posesMsgs.clear();
@@ -678,6 +879,7 @@ bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
   if (!_json.IsValid())
     return false;
 
+
   FString name = _json->GetStringField("name");
 
   // identify which type of entity (model, link, or visual) this pose is
@@ -700,6 +902,12 @@ bool FGzIface::UpdatePoseFromMsg(TSharedPtr<FJsonObject> _json)
   // find model
   auto it = this->dataPtr->actors.find(modelName);
   if (it == this->dataPtr->actors.end())
+    return false;
+
+  // ignore skeletal pose updates from gz as
+  TArray<USkeletalMeshComponent *> meshComps;
+  it->second->GetComponents(meshComps);
+  if (meshComps.Num() > 0)
     return false;
 
   FVector pos;
@@ -784,6 +992,10 @@ void FGzIface::Tick(float _delta)
   // Wait and verify UE4 models are created in gazebo before stepping.
   if (this->dataPtr->lockStep && !this->dataPtr->entityToCreate.empty())
     return;
+
+
+  /// TODO remove me
+  // return;
 
   ////////////////////
   // Sync Pose
